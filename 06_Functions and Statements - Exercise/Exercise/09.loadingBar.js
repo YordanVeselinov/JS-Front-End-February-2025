@@ -9,7 +9,6 @@ function loadingBar(percent) {
       console.log("Still loading...");
     }
   }
-  
 
 loadingBar(50)
 loadingBar(30)
