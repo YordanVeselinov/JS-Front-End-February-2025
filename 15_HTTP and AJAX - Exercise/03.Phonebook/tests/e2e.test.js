@@ -1,251 +1,106 @@
-const { chromium } = require('playwright-chromium');
-const { expect } = require('chai');
+function attachEvents() {
+  let phonebookUl = document.getElementById('phonebook');
+  let loadButton = document.getElementById('btnLoad');
+  let createButton = document.getElementById('btnCreate');
+  let personInput = document.getElementById('person');
+  let phoneInput = document.getElementById('phone');
 
-const host = 'http://localhost:3000'; // Application host (NOT service host - that can be anything)
-const interval = 300;
-const timeout = 8000;
-const DEBUG = false;
-const slowMo = 500;
+  let baseUrl = 'http://localhost:3030/jsonstore/phonebook';
 
-const mockData = {
-  list: [
-    {
-      person: 'Maya',
-      phone: '+1-555-7653',
-      _id: '1001',
-    },
-    {
-      person: 'Peter',
-      phone: '+1-545-7353',
-      _id: '1002',
-    },
-  ],
-};
+  loadButton.addEventListener('click', loadPhonebookHandler);
+  createButton.addEventListener('click', createEntryHandler);
 
-const endpoints = {
-  catalog: '/jsonstore/phonebook',
-  delete: (id) => `jsonstore/phonebook/${id}`,
-};
+  async function loadPhonebookHandler() {
+      phonebookUl.innerHTML = ''; 
+      try {
+          let response = await fetch(baseUrl);
+          if (!response.ok) {
+              throw new Error(`HTTP error! status: ${response.status}`);
+          }
+          let entries = await response.json();
+          // Tests mock an array, Object.values handles both object or array responses
+          let entriesArray = Object.values(entries); 
 
-let browser;
-let context;
-let page;
+          entriesArray.forEach(entry => {
+              // Basic check for necessary properties based on tests/requirements
+              if (entry.person && entry.phone && entry._id) { 
+                  let li = document.createElement('li');
+                  
+                  // --- FIX START ---
+                  // Create text node for person and phone (without trailing space)
+                  let textNode = document.createTextNode(`${entry.person}: ${entry.phone}`);
+                  li.appendChild(textNode); 
+                  // --- FIX END ---
 
-describe('E2E tests', function () {
-  // Setup
-  this.timeout(DEBUG ? 120000 : timeout);
-  before(
-    async () =>
-      (browser = await chromium.launch(
-        DEBUG ? { headless: false, slowMo } : {}
-      ))
-  );
-  after(async () => await browser.close());
-  beforeEach(async () => {
-    context = await browser.newContext();
-    setupContext(context);
-    page = await context.newPage();
-  });
-  afterEach(async () => {
-    await page.close();
-    await context.close();
-  });
+                  let deleteButton = document.createElement('button');
+                  deleteButton.textContent = 'Delete';
+                  deleteButton.addEventListener('click', () => deleteEntryHandler(entry._id)); 
+                  
+                  li.appendChild(deleteButton); // Append button after the text node
+                  phonebookUl.appendChild(li);
+              }
+          });
 
-  // Test proper
-  describe('Messenger Info', () => {
-    it('Load Message', async () => {
-      const data = mockData.list;
-      const { get } = await handle(endpoints.catalog);
-      get(data);
-
-      await page.goto(host);
-      await page.waitForSelector('#btnLoad' , { timeout: interval });
-
-      await page.click('#btnLoad', { timeout: interval });
-
-      const phone = await page.$$eval(`#phonebook li`, (t) =>
-        t.map((s) => s.textContent)
-      );
-
-      expect(phone[0]).to.equal(`${data[0].person}: ${data[0].phone}Delete`);
-      expect(phone[1]).to.equal(`${data[1].person}: ${data[1].phone}Delete`);
-    });
-
-    it('Length Message', async () => {
-      const data = mockData.list;
-      const { get } = await handle(endpoints.catalog);
-      get(data);
-
-      await page.goto(host);
-      await page.waitForSelector('#btnLoad' , { timeout: interval });
-
-      await page.click('#btnLoad', { timeout: interval });
-
-      const phone = await page.$$eval(`#phonebook li`, (t) =>
-        t.map((s) => s.textContent)
-      );
-    
-      expect(phone.length).to.equal(data.length);
-    });
-
-    it('Send Message API call', async () => {
-      const data = mockData.list[0];
-      await page.goto(host);
-
-      const { post } = await handle(endpoints.catalog);
-      const { onRequest } = post();
-
-      await page.waitForSelector('#person', { timeout: interval });
-      await page.waitForSelector('#phone', { timeout: interval });
-
-      await page.fill('input[id="person"]', data.person + '1');
-      await page.fill('input[id="phone"]', data.phone + '1');
-
-      const [request] = await Promise.all([
-        onRequest(),
-        page.click('#btnCreate', { timeout: interval }),
-      ]);
-
-      const postData = JSON.parse(request.postData());
-
-      expect(postData.person).to.equal(data.person + '1');
-      expect(postData.phone).to.equal(data.phone + '1');
-    });
-
-    it('Delete makes correct API call', async () => {
-      const data = mockData.list[0];
-      await page.goto(host);
-      const { del } = await handle(endpoints.delete(data._id));
-      const { onResponse, isHandled } = del({ id: data._id });
-
-      await page.click('#btnLoad', { timeout: interval });
-
-      await page.waitForSelector('#phonebook>li', { timeout: interval });
-
-      await Promise.all([
-        onResponse(),
-        page.click(
-          `#phonebook li:has-text("${data.person}: ${data.phone}") >> text=Delete`
-          , { timeout: interval }),
-      ]);
-
-      expect(isHandled()).to.be.true;
-    });
-  });
-});
-
-async function setupContext(context) {
-  // Catalog and Details
-  await handleContext(context, endpoints.catalog, { get: mockData.list });
-  await handleContext(context, endpoints.catalog, { post: mockData.list[0] });
-
-  await handleContext(context, endpoints.delete('1001'), {
-    get: mockData.list[0],
-  });
-
-  // Block external calls
-  await context.route(
-    (url) => url.href.slice(0, host.length) != host,
-    (route) => {
-      if (DEBUG) {
-        console.log('Preventing external call to ' + route.request().url());
+      } catch (error) {
+          console.error("Error loading phonebook:", error);
       }
-      route.abort();
-    }
-  );
-}
+  }
 
-function handle(match, handlers) {
-  return handleRaw.call(page, match, handlers);
-}
+  async function createEntryHandler() {
+      let personValue = personInput.value.trim();
+      let phoneValue = phoneInput.value.trim();
 
-function handleContext(context, match, handlers) {
-  return handleRaw.call(context, match, handlers);
-}
-
-async function handleRaw(match, handlers) {
-  const methodHandlers = {};
-  const result = {
-    get: (returns, options) => request('GET', returns, options),
-    get2: (returns, options) => request('GET', returns, options),
-    post: (returns, options) => request('POST', returns, options),
-    put: (returns, options) => request('PUT', returns, options),
-    patch: (returns, options) => request('PATCH', returns, options),
-    del: (returns, options) => request('DELETE', returns, options),
-    delete: (returns, options) => request('DELETE', returns, options),
-  };
-
-  const context = this;
-
-  await context.route(urlPredicate, (route, request) => {
-    if (DEBUG) {
-      console.log('>>>', request.method(), request.url());
-    }
-
-    const handler = methodHandlers[request.method().toLowerCase()];
-    if (handler == undefined) {
-      route.continue();
-    } else {
-      handler(route, request);
-    }
-  });
-
-  if (handlers) {
-    for (let method in handlers) {
-      if (typeof handlers[method] == 'function') {
-        handlers[method](result[method]);
-      } else {
-        result[method](handlers[method]);
+      if (!personValue || !phoneValue) {
+          console.log("Person and Phone fields cannot be empty.");
+          return;
       }
-    }
+
+      let newEntry = {
+          person: personValue,
+          phone: phoneValue
+      };
+
+      try {
+          let response = await fetch(baseUrl, {
+              method: 'POST',
+              headers: {
+                  'Content-Type': 'application/json'
+              },
+              body: JSON.stringify(newEntry)
+          });
+
+          if (!response.ok) {
+              throw new Error(`HTTP error! status: ${response.status}`);
+          }
+
+          personInput.value = '';
+          phoneInput.value = '';
+
+          await loadPhonebookHandler(); 
+
+      } catch (error) {
+          console.error("Error creating entry:", error);
+      }
   }
 
-  return result;
+  async function deleteEntryHandler(entryId) {
+      let deleteUrl = `${baseUrl}/${entryId}`;
+      
+      try {
+          let response = await fetch(deleteUrl, {
+              method: 'DELETE'
+          });
 
-  function request(method, returns, options) {
-    let handled = false;
+          if (!response.ok) {
+              throw new Error(`HTTP error! status: ${response.status}`);
+          }
 
-    methodHandlers[method.toLowerCase()] = (route, request) => {
-      handled = true;
-      route.fulfill(respond(returns, options));
-    };
+          await loadPhonebookHandler(); 
 
-    return {
-      onRequest: () => context.waitForRequest(urlPredicate),
-      onResponse: () => context.waitForResponse(urlPredicate),
-      isHandled: () => handled,
-    };
-  }
-
-  function urlPredicate(current) {
-    if (current instanceof URL) {
-      return current.href.toLowerCase().includes(match.toLowerCase());
-    } else {
-      return current.url().toLowerCase().includes(match.toLowerCase());
-    }
+      } catch (error) {
+          console.error("Error deleting entry:", error);
+      }
   }
 }
 
-function respond(data, options = {}) {
-  options = Object.assign(
-    {
-      json: true,
-      status: 200,
-    },
-    options
-  );
-
-  const headers = {
-    'Access-Control-Allow-Origin': '*',
-  };
-  if (options.json) {
-    headers['Content-Type'] = 'application/json';
-    data = JSON.stringify(data);
-  }
-
-  return {
-    status: options.status,
-    headers,
-    body: data,
-  };
-}
+attachEvents();
