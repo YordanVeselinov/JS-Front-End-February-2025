@@ -1,4 +1,5 @@
 function attachEvents() {
+    // Use 'let' instead of 'const'
     let locationInput = document.getElementById('location');
     let submitButton = document.getElementById('submit');
     let forecastDiv = document.getElementById('forecast'); 
